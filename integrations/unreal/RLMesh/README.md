@@ -25,6 +25,8 @@ Add an **RLMesh Reach Target** component to any actor and press Play. The log sh
 
 **Avoid Hazards** (`URLMeshAvoidHazardsComponent`, env id `Unreal-AvoidHazards-v0`): XY reach with `NumHazards` cubes; obs `Box[2+2N]`; collision terminates (`hit_hazard`). Demos: `integrations/unreal/demos/avoid_hazards/`.
 
+**Collect Coins** (`URLMeshCollectCoinsComponent`, env id `Unreal-CollectCoins-v0`): XY collect `NumCoins` gold spheres; obs `Box[3]` (nearest coin + coins left); terminates when all collected (`success`). Demos: `integrations/unreal/demos/collect_coins/`.
+
 This is an **RLMesh env in Unreal (Gym-style API)** — not a Gymnasium registry id. Drive it with `rlmesh.run` or `rlmesh.numpy.RemoteEnv` (`integrations/unreal/demos/reach_target/gym.py`).
 
 Loopback invites include `#keys` from the session **HostIdentity**. Generate one static identity once (from the rlmesh checkout, with `mise run setup:python`):
@@ -86,6 +88,8 @@ Source/RLMeshUnreal/              the RLMeshUnreal runtime module
   Public/RLMeshEnvComponent.h     serve an env from an actor component
   Public/RLMeshReachTargetComponent.h   3D reach example env
   Public/RLMeshChasePointComponent.h    2D chase-point example env
+  Public/RLMeshAvoidHazardsComponent.h  2D avoid-hazards example env
+  Public/RLMeshCollectCoinsComponent.h  2D collect-coins example env
   Public/RLMeshGameThreadEnv.h    hands server calls to the game thread (no Unreal headers)
   Public/RLMeshIncludes.h         includes rlmesh.hpp as a third-party header
 Source/ThirdParty/rlmesh/         the unpacked RLMesh package (not committed)
