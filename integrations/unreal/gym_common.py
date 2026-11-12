@@ -1,0 +1,255 @@
+"""Shared helpers for the Unreal primitive gym suite.
+
+Address / dotenv reuse the Reach Target identity files. Learned-agent helpers
+wrap ``rlmesh.numpy.RemoteEnv`` with Stable-Baselines3 PPO (CPU).
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+_UNREAL_DIR = Path(__file__).resolve().parent
+if str(_UNREAL_DIR) not in sys.path:
+    sys.path.insert(0, str(_UNREAL_DIR))
+
+from reach_target_dotenv import apply_dotenv
+from reach_target_paths import (
+    DOTENV_PATH,
+    EPISODES_VAR,
+    UNREAL_ADDR_VAR,
+    UNREAL_DIR,
+)
+
+ARTIFACTS_DIR = UNREAL_DIR / "artifacts"
+
+# Soft default: short enough for a live PIE smoke train.
+DEFAULT_TRAIN_TIMESTEPS = 2_048
+DEFAULT_EVAL_EPISODES = 1
+
+
+def ensure_artifacts_dir(env_name: str) -> Path:
+    """Return ``artifacts/<env_name>/``, creating it if needed."""
+    path = ARTIFACTS_DIR / env_name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def default_model_path(env_name: str, *, filename: str = "ppo.zip") -> Path:
+    return ensure_artifacts_dir(env_name) / filename
+
+
+def load_suite_dotenv() -> dict[str, str]:
+    """Apply ``integrations/unreal/.env`` without overwriting existing env vars."""
+    return apply_dotenv(DOTENV_PATH)
+
+
+def resolve_address(cli_address: str | None = None) -> str:
+    """Resolve Serving address from CLI override or ``RLMESH_UNREAL_ADDR``."""
+    load_suite_dotenv()
+    if cli_address and cli_address.strip():
+        return cli_address.strip()
+    return os.environ.get(UNREAL_ADDR_VAR, "").strip()
+
+
+def require_address(cli_address: str | None = None) -> str:
+    """Like :func:`resolve_address`, but raise if empty."""
+    addr = resolve_address(cli_address)
+    if not addr:
+        raise ValueError(
+            "No Serving address. Run reach_target_app.py --init-identity, "
+            "press Play in Unreal, or pass address=... / --address."
+        )
+    return addr
+
+
+def make_remote_env(address: str | None = None, **remote_kwargs: Any):
+    """Connect to a serving Unreal env as ``rlmesh.numpy.RemoteEnv``.
+
+    When gymnasium is installed, the client is a ``gymnasium.Env``.
+    """
+    addr = require_address(address)
+    from rlmesh.numpy import RemoteEnv
+
+    return RemoteEnv(addr, **remote_kwargs)
+
+
+def smoke_remote_env(address: str | None = None, **remote_kwargs: Any) -> int:
+    """Connect, ``reset``, one ``step``, ``close``. Returns process exit code."""
+    try:
+        env = make_remote_env(address, **remote_kwargs)
+    except Exception as exc:  # noqa: BLE001 - CLI surface
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    try:
+        obs, info = env.reset()
+        print(f"reset obs={obs} info_keys={sorted(info)}")
+        print(f"observation_space={env.observation_space}")
+        print(f"action_space={env.action_space}")
+        action = env.action_space.sample()
+        step = env.step(action)
+        print(f"step action={action} -> len={len(step)}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: smoke failed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        env.close()
+    print("gym smoke finished successfully.")
+    return 0
+
+
+def run_scripted(
+    predict: Callable[[object], object],
+    *,
+    address: str | None = None,
+    episodes: int | None = None,
+    seeds: str = "",
+    model_label: str = "scripted",
+) -> int:
+    """Drive a serving env with ``rlmesh.run`` and a scripted predict callable."""
+    try:
+        import rlmesh
+        import rlmesh.numpy
+    except ImportError:
+        print(
+            "ERROR: rlmesh is not installed in this Python.\n"
+            "From the rlmesh checkout: mise run setup:python\n"
+            f"Current interpreter: {sys.executable}",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        addr = require_address(address)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    if "#" not in addr:
+        print(
+            "WARNING: address has no #keys; loopback hosts usually require the full invite.",
+            file=sys.stderr,
+        )
+
+    if episodes is None:
+        episodes = int(os.environ.get(EPISODES_VAR, "1") or "1")
+
+    run_kwargs: dict[str, Any] = {"episodes": episodes}
+    if seeds.strip():
+        parsed = [int(part.strip()) for part in seeds.split(",") if part.strip()]
+        if not parsed:
+            print("ERROR: --seeds was set but no integers were parsed.", file=sys.stderr)
+            return 1
+        run_kwargs = {"seeds": parsed}
+
+    model = rlmesh.numpy.Model(predict)
+    print(f"Connecting to {addr} …")
+    print(f"Model: {model_label}  options: {run_kwargs}")
+    try:
+        result = rlmesh.run(model, addr, **run_kwargs)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: run failed: {exc}", file=sys.stderr)
+        print(
+            "Checks:\n"
+            "  - Unreal is in Play and LogRLMesh shows Serving\n"
+            "  - LogRLMesh shows Loaded RLMESH_HOST_IDENTITY (rebuild plugin if missing)\n"
+            "  - RLMESH_UNREAL_ADDR in integrations/unreal/.env matches the Serving #keys\n"
+            "  - plugin rlmesh_capi matches this Python's workflow edition "
+            "(RLMESH_RELEASE_BUILD=1 on Windows)",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(result)
+    print("scripted run finished successfully.")
+    return 0
+
+
+def _require_sb3():
+    try:
+        from stable_baselines3 import PPO
+    except ImportError as exc:  # pragma: no cover - optional suite dep
+        raise ImportError(
+            "stable-baselines3 is required for learned agents.\n"
+            "Install suite deps: pip install -r integrations/unreal/requirements-gym-suite.txt"
+        ) from exc
+    return PPO
+
+
+def train_ppo(
+    *,
+    env_name: str,
+    address: str | None = None,
+    total_timesteps: int = DEFAULT_TRAIN_TIMESTEPS,
+    model_path: Path | str | None = None,
+    seed: int | None = 0,
+    verbose: int = 1,
+    **ppo_kwargs: Any,
+) -> Path:
+    """Train SB3 PPO on a live Unreal ``RemoteEnv``; save under ``artifacts/<env>/``."""
+    PPO = _require_sb3()
+    out = Path(model_path) if model_path else default_model_path(env_name)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    env = make_remote_env(address)
+    save_stem = str(out.with_suffix(""))
+    try:
+        model = PPO("MlpPolicy", env, verbose=verbose, seed=seed, **ppo_kwargs)
+        model.learn(total_timesteps=total_timesteps)
+        # SB3 writes ``<stem>.zip``.
+        model.save(save_stem)
+    finally:
+        env.close()
+
+    saved = Path(save_stem + ".zip")
+    print(f"saved {saved}")
+    return saved
+
+
+def eval_ppo(
+    *,
+    env_name: str,
+    address: str | None = None,
+    model_path: Path | str | None = None,
+    episodes: int = DEFAULT_EVAL_EPISODES,
+    deterministic: bool = True,
+    seed: int | None = 0,
+) -> list[float]:
+    """Run a saved PPO zip for ``episodes``; return per-episode returns."""
+    PPO = _require_sb3()
+    path = Path(model_path) if model_path else default_model_path(env_name)
+    if not path.is_file():
+        # Allow stem without .zip
+        alt = path if path.suffix == ".zip" else Path(str(path) + ".zip")
+        if alt.is_file():
+            path = alt
+        else:
+            raise FileNotFoundError(f"no saved model at {path}")
+
+    load_stem = str(path.with_suffix("")) if path.suffix == ".zip" else str(path)
+    model = PPO.load(load_stem)
+
+    env = make_remote_env(address)
+    returns: list[float] = []
+    try:
+        for ep in range(episodes):
+            obs, _info = env.reset(seed=None if seed is None else seed + ep)
+            done = False
+            ep_ret = 0.0
+            while not done:
+                action, _ = model.predict(obs, deterministic=deterministic)
+                obs, reward, terminated, truncated, _info = env.step(action)
+                ep_ret += float(reward)
+                done = bool(terminated or truncated)
+            returns.append(ep_ret)
+            print(f"episode {ep + 1}/{episodes} return={ep_ret:.4f}")
+    finally:
+        env.close()
+
+    if returns:
+        mean = sum(returns) / len(returns)
+        print(f"mean return over {len(returns)} episode(s): {mean:.4f}")
+    return returns

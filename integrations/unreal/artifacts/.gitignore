@@ -1,0 +1,4 @@
+# Keep the directory / README; ignore train outputs.
+*
+!.gitignore
+!README.md

@@ -40,6 +40,10 @@ integrations/unreal/RLMesh/Binaries/
 integrations/unreal/RLMesh/Intermediate/
 integrations/unreal/RLMesh/Saved/
 
+# Unreal primitive gym suite SB3 checkpoints / train logs
+# (README + nested .gitignore kept under integrations/unreal/artifacts/)
+integrations/unreal/artifacts/*/
+
 # Browser binding (javascript/rlmesh): npm deps, wasm-bindgen output, test bundles
 javascript/rlmesh/node_modules/
 javascript/rlmesh/pkg/
