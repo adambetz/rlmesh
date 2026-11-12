@@ -1,7 +1,7 @@
-"""Shared helpers for the Unreal primitive gym suite.
+"""Shared helpers for Unreal primitive gym demos.
 
-Address / dotenv reuse the Reach Target identity files. Learned-agent helpers
-wrap ``rlmesh.numpy.RemoteEnv`` with Stable-Baselines3 PPO (CPU).
+Address / dotenv use the shared identity under ``integrations/unreal/.env``.
+Learned-agent helpers wrap ``rlmesh.numpy.RemoteEnv`` with Stable-Baselines3 PPO.
 """
 
 from __future__ import annotations
@@ -12,34 +12,31 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-_UNREAL_DIR = Path(__file__).resolve().parent
-if str(_UNREAL_DIR) not in sys.path:
-    sys.path.insert(0, str(_UNREAL_DIR))
+_COMMON_DIR = Path(__file__).resolve().parent
+if str(_COMMON_DIR) not in sys.path:
+    sys.path.insert(0, str(_COMMON_DIR))
 
-from reach_target_dotenv import apply_dotenv
-from reach_target_paths import (
+from dotenv import apply_dotenv
+from paths import (
     DOTENV_PATH,
     EPISODES_VAR,
     UNREAL_ADDR_VAR,
-    UNREAL_DIR,
 )
 
-ARTIFACTS_DIR = UNREAL_DIR / "artifacts"
-
-# Soft default: short enough for a live PIE smoke train.
-DEFAULT_TRAIN_TIMESTEPS = 2_048
+# Soft defaults for live Unreal PIE (~1 step/frame ≈ 2–5 FPS).
+DEFAULT_TRAIN_TIMESTEPS = 512
+DEFAULT_PPO_N_STEPS = 128
 DEFAULT_EVAL_EPISODES = 1
 
 
-def ensure_artifacts_dir(env_name: str) -> Path:
-    """Return ``artifacts/<env_name>/``, creating it if needed."""
-    path = ARTIFACTS_DIR / env_name
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def ensure_artifacts_dir(artifacts_dir: Path) -> Path:
+    """Ensure ``artifacts_dir`` exists and return it."""
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    return artifacts_dir
 
 
-def default_model_path(env_name: str, *, filename: str = "ppo.zip") -> Path:
-    return ensure_artifacts_dir(env_name) / filename
+def default_model_path(artifacts_dir: Path, *, filename: str = "ppo.zip") -> Path:
+    return ensure_artifacts_dir(artifacts_dir) / filename
 
 
 def load_suite_dotenv() -> dict[str, str]:
@@ -60,27 +57,55 @@ def require_address(cli_address: str | None = None) -> str:
     addr = resolve_address(cli_address)
     if not addr:
         raise ValueError(
-            "No Serving address. Run reach_target_app.py --init-identity, "
-            "press Play in Unreal, or pass address=... / --address."
+            "No Serving address. Run "
+            "integrations/unreal/demos/reach_target/app.py --init-identity, "
+            "open the Unreal editor, or pass address=... / --address."
         )
     return addr
 
 
-def make_remote_env(address: str | None = None, **remote_kwargs: Any):
+def ensure_unreal_demo(demo_id: str | None) -> None:
+    """Ask the editor to load ``demo_id`` and Play before connecting."""
+    if not demo_id:
+        return
+    from demo_client import DemoControlError, ensure_demo
+
+    print(f"Ensuring Unreal demo={demo_id} …")
+    try:
+        status = ensure_demo(demo_id)
+    except DemoControlError as exc:
+        raise RuntimeError(str(exc)) from exc
+    env_id = status.get("env_id")
+    print(f"Unreal ready: demo={status.get('demo_id')} env_id={env_id}")
+
+
+def make_remote_env(
+    address: str | None = None,
+    *,
+    demo_id: str | None = None,
+    **remote_kwargs: Any,
+):
     """Connect to a serving Unreal env as ``rlmesh.numpy.RemoteEnv``.
 
+    When ``demo_id`` is set, load that scenario via the demo control API first.
     When gymnasium is installed, the client is a ``gymnasium.Env``.
     """
+    ensure_unreal_demo(demo_id)
     addr = require_address(address)
     from rlmesh.numpy import RemoteEnv
 
     return RemoteEnv(addr, **remote_kwargs)
 
 
-def smoke_remote_env(address: str | None = None, **remote_kwargs: Any) -> int:
+def smoke_remote_env(
+    address: str | None = None,
+    *,
+    demo_id: str | None = None,
+    **remote_kwargs: Any,
+) -> int:
     """Connect, ``reset``, one ``step``, ``close``. Returns process exit code."""
     try:
-        env = make_remote_env(address, **remote_kwargs)
+        env = make_remote_env(address, demo_id=demo_id, **remote_kwargs)
     except Exception as exc:  # noqa: BLE001 - CLI surface
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -105,6 +130,7 @@ def run_scripted(
     predict: Callable[[object], object],
     *,
     address: str | None = None,
+    demo_id: str | None = None,
     episodes: int | None = None,
     seeds: str = "",
     model_label: str = "scripted",
@@ -123,8 +149,9 @@ def run_scripted(
         return 1
 
     try:
+        ensure_unreal_demo(demo_id)
         addr = require_address(address)
-    except ValueError as exc:
+    except (ValueError, RuntimeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
@@ -154,7 +181,8 @@ def run_scripted(
         print(f"ERROR: run failed: {exc}", file=sys.stderr)
         print(
             "Checks:\n"
-            "  - Unreal is in Play and LogRLMesh shows Serving\n"
+            "  - Unreal editor is open (demo control loads the scenario)\n"
+            "  - LogRLMesh shows Serving for this env\n"
             "  - LogRLMesh shows Loaded RLMESH_HOST_IDENTITY (rebuild plugin if missing)\n"
             "  - RLMESH_UNREAL_ADDR in integrations/unreal/.env matches the Serving #keys\n"
             "  - plugin rlmesh_capi matches this Python's workflow edition "
@@ -174,28 +202,39 @@ def _require_sb3():
     except ImportError as exc:  # pragma: no cover - optional suite dep
         raise ImportError(
             "stable-baselines3 is required for learned agents.\n"
-            "Install suite deps: pip install -r integrations/unreal/requirements-gym-suite.txt"
+            "Install suite deps: pip install -r "
+            "integrations/unreal/demos/common/requirements-gym-suite.txt"
         ) from exc
     return PPO
 
 
 def train_ppo(
     *,
-    env_name: str,
     address: str | None = None,
+    demo_id: str | None = None,
+    artifacts_dir: Path | None = None,
     total_timesteps: int = DEFAULT_TRAIN_TIMESTEPS,
     model_path: Path | str | None = None,
     seed: int | None = 0,
     verbose: int = 1,
+    n_steps: int = DEFAULT_PPO_N_STEPS,
     **ppo_kwargs: Any,
 ) -> Path:
-    """Train SB3 PPO on a live Unreal ``RemoteEnv``; save under ``artifacts/<env>/``."""
+    """Train SB3 PPO on a live Unreal ``RemoteEnv``; save under ``artifacts_dir``."""
     PPO = _require_sb3()
-    out = Path(model_path) if model_path else default_model_path(env_name)
+    if model_path is not None:
+        out = Path(model_path)
+    elif artifacts_dir is not None:
+        out = default_model_path(artifacts_dir)
+    else:
+        raise ValueError("pass model_path= or artifacts_dir=")
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    env = make_remote_env(address)
+    env = make_remote_env(address, demo_id=demo_id)
     save_stem = str(out.with_suffix(""))
+    # Keep n_steps small so PIE smoke trains log/update before multi-minute waits.
+    ppo_kwargs.setdefault("n_steps", n_steps)
+    ppo_kwargs.setdefault("batch_size", min(64, n_steps))
     try:
         model = PPO("MlpPolicy", env, verbose=verbose, seed=seed, **ppo_kwargs)
         model.learn(total_timesteps=total_timesteps)
@@ -211,8 +250,9 @@ def train_ppo(
 
 def eval_ppo(
     *,
-    env_name: str,
     address: str | None = None,
+    demo_id: str | None = None,
+    artifacts_dir: Path | None = None,
     model_path: Path | str | None = None,
     episodes: int = DEFAULT_EVAL_EPISODES,
     deterministic: bool = True,
@@ -220,7 +260,12 @@ def eval_ppo(
 ) -> list[float]:
     """Run a saved PPO zip for ``episodes``; return per-episode returns."""
     PPO = _require_sb3()
-    path = Path(model_path) if model_path else default_model_path(env_name)
+    if model_path is not None:
+        path = Path(model_path)
+    elif artifacts_dir is not None:
+        path = default_model_path(artifacts_dir)
+    else:
+        raise ValueError("pass model_path= or artifacts_dir=")
     if not path.is_file():
         # Allow stem without .zip
         alt = path if path.suffix == ".zip" else Path(str(path) + ".zip")
@@ -232,7 +277,7 @@ def eval_ppo(
     load_stem = str(path.with_suffix("")) if path.suffix == ".zip" else str(path)
     model = PPO.load(load_stem)
 
-    env = make_remote_env(address)
+    env = make_remote_env(address, demo_id=demo_id)
     returns: list[float] = []
     try:
         for ep in range(episodes):

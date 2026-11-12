@@ -21,14 +21,16 @@ It runs on Win64 and Linux and uses the prebuilt RLMesh C/C++ library. The `.upl
 
 Add an **RLMesh Reach Target** component to any actor and press Play. The log shows `Serving … on 127.0.0.1:7447#…/env`: the env `env` in a session the game hosts on port 7447. **Steps move that component’s owner** (if its root was Static, BeginPlay upgrades it to Movable). Each episode moves the owner in world XYZ toward a target: a hidden random offset in a cube by default, or set **Target Actor** to a level actor. Observation is the remaining XYZ gap (`Box[3]`); action is `Box([-1, 1]^3)` × **Step Size**; reward is minus normalized Euclidean distance. Reset/step `info` also carries `agent_xyz`, `target_xyz`, `distance`, and `steps`.
 
-This is an **RLMesh env in Unreal (Gym-style API)** — not a Gymnasium registry id. Drive it with `rlmesh.run` or `rlmesh.numpy.RemoteEnv` (`integrations/unreal/reach_target_gym.py`).
+**Chase Point** (`URLMeshChasePointComponent`, env id `Unreal-ChasePoint-v0`) is the planar sibling: obs/action `Box[2]` (XY), Z locked, optional **Goal Actor**. The goal wanders on the floor for **Goal Move Steps** (not toward the agent, inside **Goal Wander Radius**), then freezes. Python demos live under `integrations/unreal/demos/chase_point/`.
+
+This is an **RLMesh env in Unreal (Gym-style API)** — not a Gymnasium registry id. Drive it with `rlmesh.run` or `rlmesh.numpy.RemoteEnv` (`integrations/unreal/demos/reach_target/gym.py`).
 
 Loopback invites include `#keys` from the session **HostIdentity**. Generate one static identity once (from the rlmesh checkout, with `mise run setup:python`):
 
 ```bash
-python integrations/unreal/reach_target_app.py --init-identity   # once per machine
-# rebuild the plugin once, then Play
-python integrations/unreal/reach_target_app.py                   # uses integrations/unreal/.env
+python integrations/unreal/demos/reach_target/app.py --init-identity   # once per machine
+# rebuild the plugin once, open the editor
+python integrations/unreal/demos/reach_target/app.py                  # uses integrations/unreal/.env
 ```
 
 The plugin loads that identity into `RLMESH_HOST_IDENTITY` at module startup (and again at BeginPlay), so Serving `#keys` stay stable across Play.
@@ -80,7 +82,8 @@ See the [C++ guide](../../../crates/rlmesh-capi/README-cpp.md) for spaces, value
 RLMesh.uplugin
 Source/RLMeshUnreal/              the RLMeshUnreal runtime module
   Public/RLMeshEnvComponent.h     serve an env from an actor component
-  Public/RLMeshReachTargetComponent.h   the example env
+  Public/RLMeshReachTargetComponent.h   3D reach example env
+  Public/RLMeshChasePointComponent.h    2D chase-point example env
   Public/RLMeshGameThreadEnv.h    hands server calls to the game thread (no Unreal headers)
   Public/RLMeshIncludes.h         includes rlmesh.hpp as a third-party header
 Source/ThirdParty/rlmesh/         the unpacked RLMesh package (not committed)
