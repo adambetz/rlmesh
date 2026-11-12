@@ -23,6 +23,8 @@ Add an **RLMesh Reach Target** component to any actor and press Play. The log sh
 
 **Chase Point** (`URLMeshChasePointComponent`, env id `Unreal-ChasePoint-v0`) is the planar sibling: obs/action `Box[2]` (XY), Z locked, optional **Goal Actor**. The goal wanders on the floor for **Goal Move Steps** (not toward the agent, inside **Goal Wander Radius**), then freezes. Python demos live under `integrations/unreal/demos/chase_point/`.
 
+**Avoid Hazards** (`URLMeshAvoidHazardsComponent`, env id `Unreal-AvoidHazards-v0`): XY reach with `NumHazards` cubes; obs `Box[2+2N]`; collision terminates (`hit_hazard`). Demos: `integrations/unreal/demos/avoid_hazards/`.
+
 This is an **RLMesh env in Unreal (Gym-style API)** — not a Gymnasium registry id. Drive it with `rlmesh.run` or `rlmesh.numpy.RemoteEnv` (`integrations/unreal/demos/reach_target/gym.py`).
 
 Loopback invites include `#keys` from the session **HostIdentity**. Generate one static identity once (from the rlmesh checkout, with `mise run setup:python`):

@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <limits>
 
-namespace
+namespace ChasePointDetail
 {
 FVector2D ActionAsDirectionXY(const rlmesh::Value& Action)
 {
@@ -24,7 +24,7 @@ FVector2D ActionAsDirectionXY(const rlmesh::Value& Action)
 	const float* Data = reinterpret_cast<const float*>(Bytes.data());
 	return FVector2D(static_cast<double>(Data[0]), static_cast<double>(Data[1]));
 }
-} // namespace
+} // namespace ChasePointDetail
 
 URLMeshChasePointComponent::URLMeshChasePointComponent()
 {
@@ -175,7 +175,7 @@ rlmesh::StepResult URLMeshChasePointComponent::StepEnv(const std::optional<rlmes
 			"step needs a float32 action of shape (2,) in [-1, 1]");
 	}
 
-	FVector2D Dir = ActionAsDirectionXY(*Action);
+	FVector2D Dir = ChasePointDetail::ActionAsDirectionXY(*Action);
 	AActor* Owner = GetOwner();
 	const double DistBefore = DistanceXY();
 	if (!Dir.IsNearlyZero() && DistBefore > 0.0)
