@@ -71,10 +71,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "RLMesh")
 	TObjectPtr<AActor> GoalActor;
 
-	/**
-	 * Material for runtime-spawned hazard cubes.
-	 * Empty loads /Game/Red (RLmeshSim Content) when available.
-	 */
+	/** Optional material for runtime-spawned hazard cubes. */
 	UPROPERTY(EditAnywhere, Category = "RLMesh")
 	TObjectPtr<UMaterialInterface> HazardMaterial;
 

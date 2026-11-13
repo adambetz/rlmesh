@@ -198,7 +198,7 @@ def toward_goal_arena(
     import numpy as np
 
     global _hug, _hug_steps, _open_streak, _last_target_dist
-    del wall_sense_range
+    _ = wall_sense_range  # reserved for policies that scale CLEAR by sense range
 
     goal, coins, obstacles, walls = parse_obs(
         obs,

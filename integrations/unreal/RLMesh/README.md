@@ -27,7 +27,7 @@ Add an **RLMesh Reach Target** component to any actor and press Play. The log sh
 
 **Collect Coins** (`URLMeshCollectCoinsComponent`, env id `Unreal-CollectCoins-v0`): XY collect `NumCoins` gold spheres; obs `Box[3]` (nearest coin + coins left); terminates when all collected (`success`). Demos: `integrations/unreal/demos/collect_coins/`.
 
-**Demo Arena** (`URLMeshDemoArenaComponent`, env id `Unreal-DemoArena-v0`): level-driven GameScene_Demo — collect all Coins and the Goal (goal acts like a coin; both hide on overlap), fail on Obstacles, walls block via sweep. Obs `Box[2+2C+2O+W]` (defaults → `Box[18]` with 8 wall rays). Demos: `integrations/unreal/demos/demo_arena/`.
+**Demo Arena** (`URLMeshDemoArenaComponent`, env id `Unreal-DemoArena-v0`): level-driven arena — collect all Coins and the Goal (goal acts like a coin; both hide on overlap), fail on Obstacles, walls block via sweep. Obs `Box[2+2C+2O+W]` (defaults → `Box[18]` with 8 wall rays). Demos: `integrations/unreal/demos/demo_arena/`.
 
 This is an **RLMesh env in Unreal (Gym-style API)** — not a Gymnasium registry id. Drive it with `rlmesh.run` or `rlmesh.numpy.RemoteEnv` (`integrations/unreal/demos/reach_target/gym.py`).
 

@@ -109,8 +109,6 @@ void URLMeshCollectCoinsComponent::EnsureCoinActors()
 			Extra->Destroy();
 		}
 	}
-	// Prefer the placeable BP (/Game/BP_Coin); fall back to a BasicShapes sphere.
-	UClass* CoinBP = LoadClass<AActor>(nullptr, TEXT("/Game/BP_Coin.BP_Coin_C"));
 	UStaticMesh* Mesh =
 		LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	const float Scale = (CoinHalfExtent * 2.f) / 100.f; // BasicShapes Sphere is 100uu
@@ -118,41 +116,27 @@ void URLMeshCollectCoinsComponent::EnsureCoinActors()
 	{
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		AActor* Coin = nullptr;
-		if (CoinBP)
-		{
-			Coin = World->SpawnActor<AActor>(CoinBP, Start, FRotator::ZeroRotator, Params);
-		}
+		AStaticMeshActor* Coin =
+			World->SpawnActor<AStaticMeshActor>(Start, FRotator::ZeroRotator, Params);
 		if (!Coin)
 		{
-			AStaticMeshActor* SMA =
-				World->SpawnActor<AStaticMeshActor>(Start, FRotator::ZeroRotator, Params);
-			if (!SMA)
-			{
-				break;
-			}
-			if (UStaticMeshComponent* SMC = SMA->GetStaticMeshComponent())
-			{
-				SMC->SetMobility(EComponentMobility::Movable);
-				if (Mesh)
-				{
-					SMC->SetStaticMesh(Mesh);
-				}
-				SMC->SetWorldScale3D(FVector(Scale));
-				SMC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-				UMaterialInterface* Mat = CoinMaterial;
-				if (!Mat)
-				{
-					Mat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Gold.Gold"));
-				}
-				if (Mat)
-				{
-					SMC->SetMaterial(0, Mat);
-				}
-			}
-			Coin = SMA;
+			break;
 		}
 		Coin->SetActorLabel(FString::Printf(TEXT("Coin_%d"), CoinActors.Num()));
+		if (UStaticMeshComponent* SMC = Coin->GetStaticMeshComponent())
+		{
+			SMC->SetMobility(EComponentMobility::Movable);
+			if (Mesh)
+			{
+				SMC->SetStaticMesh(Mesh);
+			}
+			SMC->SetWorldScale3D(FVector(Scale));
+			SMC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			if (CoinMaterial)
+			{
+				SMC->SetMaterial(0, CoinMaterial);
+			}
+		}
 		CoinActors.Add(Coin);
 	}
 }

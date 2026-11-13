@@ -31,9 +31,9 @@ _SERVE_ADDR_RE = re.compile(
 )
 
 _CONTROL_HINT = (
-    "Open the RLmeshSim Unreal editor (demo control starts automatically), "
-    "or run in the Output Log:\n"
-    '  py "G:/_UnrealProjects/RLmeshSim/Scripts/demo_control_server.py"'
+    "Open the Unreal editor with the RLMesh plugin (demo control starts "
+    "automatically on Play), or start the demo control server from the "
+    "project's Scripts folder in the Output Log."
 )
 
 

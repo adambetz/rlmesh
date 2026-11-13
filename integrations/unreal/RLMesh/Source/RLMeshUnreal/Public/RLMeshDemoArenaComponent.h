@@ -6,7 +6,7 @@
 #include "RLMeshDemoArenaComponent.generated.h"
 
 /**
- * Level-driven arena env (GameScene_Demo): collect labeled Coins and the Goal
+ * Level-driven arena env: collect labeled Coins and the Goal
  * (goal is treated like a final coin), fail on labeled Obstacles, stop against
  * walls/floor via swept movement.
  *
@@ -70,7 +70,8 @@ public:
 
 	/**
 	 * When true, StepEnv updates the logical pose immediately (obs/pickups) while
-	 * the rendered actor location eases toward it over MovementInterpTime.
+	 * the rendered actor eases from the previous logical pose over MovementInterpTime
+	 * (about one step of visual lag — stays correct at high Serving Max FPS).
 	 */
 	UPROPERTY(EditAnywhere, Category = "RLMesh")
 	bool bInterpolateMovement = true;

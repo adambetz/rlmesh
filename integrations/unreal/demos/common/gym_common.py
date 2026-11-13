@@ -135,10 +135,7 @@ def make_remote_env(
     inner_reset = env.reset
 
     def reset_with_fps(*args: Any, **kwargs: Any):
-        options = kwargs.get("options")
-        if options is None and args:
-            # gymnasium reset(*, seed=None, options=None) — options usually kw-only.
-            pass
+        # gymnasium reset(*, seed=None, options=None) — options are usually kw-only.
         kwargs["options"] = reset_options_with_fps(
             kwargs.get("options") if isinstance(kwargs.get("options"), dict) else None,
             serving_max_fps=fps,

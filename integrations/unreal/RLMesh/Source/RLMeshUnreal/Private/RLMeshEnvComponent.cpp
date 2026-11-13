@@ -64,7 +64,7 @@ void URLMeshEnvComponent::ApplyDefaultHostIdentity()
 	}
 	UE_LOG(LogRLMesh, Warning,
 		   TEXT("No host identity at %s — Serving #keys will change each Play. "
-				"Run: python integrations/unreal/reach_target_app.py --init-identity"),
+				"Run: python integrations/unreal/demos/reach_target/app.py --init-identity"),
 		   *Path);
 }
 

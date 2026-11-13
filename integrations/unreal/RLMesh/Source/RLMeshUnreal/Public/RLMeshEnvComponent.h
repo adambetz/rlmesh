@@ -23,7 +23,8 @@ DECLARE_LOG_CATEGORY_EXTERN(LogRLMesh, Log, All);
  * Loopback Serving invites include #keys derived from HostIdentity. The plugin
  * loads a static identity from HostIdentityFile (or
  * %LOCALAPPDATA%/rlmesh/unreal_host_identity) into RLMESH_HOST_IDENTITY before
- * EnvServer starts — generate it once with reach_target_app.py --init-identity.
+ * EnvServer starts — generate it once with
+ * demos/reach_target/app.py --init-identity.
  */
 UCLASS(Abstract)
 class RLMESHUNREAL_API URLMeshEnvComponent : public UActorComponent

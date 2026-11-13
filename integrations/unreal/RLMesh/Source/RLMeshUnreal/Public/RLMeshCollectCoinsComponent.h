@@ -53,10 +53,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "RLMesh", meta = (ClampMin = "1"))
 	float CoinHalfExtent = 30.f;
 
-	/**
-	 * Material for runtime-spawned coin spheres.
-	 * Empty loads /Game/Gold (RLmeshSim Content) when available.
-	 */
+	/** Optional material for runtime-spawned coin spheres. */
 	UPROPERTY(EditAnywhere, Category = "RLMesh")
 	TObjectPtr<UMaterialInterface> CoinMaterial;
 

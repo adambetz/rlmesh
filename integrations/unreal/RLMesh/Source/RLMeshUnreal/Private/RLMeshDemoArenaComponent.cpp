@@ -133,11 +133,15 @@ void URLMeshDemoArenaComponent::SetLogicalLocation(const FVector& Loc, bool bSwe
 	{
 		return;
 	}
-	const FVector VisualBefore = Owner->GetActorLocation();
+	// Sweep/collide from the previous *logical* pose — never from the lagging mesh.
+	// At high lockstep rates the display can trail many steps; using it as the sweep
+	// origin would pin the sim against walls while pickups still resolve from LogicalLocation.
+	const FVector PrevLogical = LogicalLocation;
 	FVector Resolved = Loc;
 	Resolved.Z = Start.Z;
 	if (bSweepMove)
 	{
+		Owner->SetActorLocation(PrevLogical, /*bSweep=*/false, nullptr, ETeleportType::TeleportPhysics);
 		FHitResult Hit;
 		Owner->SetActorLocation(Resolved, /*bSweep=*/true, &Hit, ETeleportType::TeleportPhysics);
 		if (Hit.bBlockingHit && Hit.ImpactNormal.Z > 0.7f)
@@ -160,14 +164,17 @@ void URLMeshDemoArenaComponent::SetLogicalLocation(const FVector& Loc, bool bSwe
 	LogicalLocation.Z = Start.Z;
 	if (bInterpolateMovement)
 	{
-		VisualFrom = VisualBefore;
+		// Ease only from the previous sim pose → at most ~one step of visual lag,
+		// so a fast lockstep episode does not leave the mesh stranded at the start.
+		VisualFrom = PrevLogical;
+		VisualFrom.Z = Start.Z;
 		MovementInterpAlpha = 0.f;
-		// Park the mesh at the previous visual pose; Tick eases toward LogicalLocation.
 		Owner->SetActorLocation(VisualFrom, false, nullptr, ETeleportType::TeleportPhysics);
 	}
 	else
 	{
 		MovementInterpAlpha = 1.f;
+		Owner->SetActorLocation(LogicalLocation, false, nullptr, ETeleportType::TeleportPhysics);
 	}
 }
 
@@ -208,22 +215,20 @@ void URLMeshDemoArenaComponent::BindLevelActors()
 		{
 			continue;
 		}
-		if (!FoundGoal &&
-			DemoArenaDetail::MatchesRole(Actor, TEXT("Goal"), TEXT("BP_Goal")))
+		if (!FoundGoal && DemoArenaDetail::MatchesRole(Actor, TEXT("Goal"), TEXT("Goal")))
 		{
 			FoundGoal = Actor;
 			continue;
 		}
-		if (DemoArenaDetail::MatchesRole(Actor, TEXT("Coin"), TEXT("BP_Coin")) &&
+		if (DemoArenaDetail::MatchesRole(Actor, TEXT("Coin"), TEXT("Coin")) &&
 			CoinActors.Num() < NumCoins)
 		{
 			CoinActors.Add(Actor);
 			continue;
 		}
-		const bool bObstacle = DemoArenaDetail::MatchesRole(Actor, TEXT("Obstacle"),
-															TEXT("BP_Obstacle")) ||
-							   DemoArenaDetail::MatchesRole(Actor, TEXT("Hazard"),
-															TEXT("BP_Obstacle"));
+		const bool bObstacle =
+			DemoArenaDetail::MatchesRole(Actor, TEXT("Obstacle"), TEXT("Obstacle")) ||
+			DemoArenaDetail::MatchesRole(Actor, TEXT("Hazard"), TEXT("Hazard"));
 		if (bObstacle && ObstacleActors.Num() < NumObstacles)
 		{
 			ObstacleActors.Add(Actor);
@@ -488,7 +493,7 @@ int32 URLMeshDemoArenaComponent::TryCollectCoins()
 			EnsurePickupProp(Coin);
 			++Collected;
 			++TotalCollected;
-			UE_LOG(LogRLMesh, Log, TEXT("Demo Arena: collected coin[%d] (%s)"), i,
+			UE_LOG(LogRLMesh, Verbose, TEXT("Demo Arena: collected coin[%d] (%s)"), i,
 				   *Coin->GetActorLabel());
 		}
 	}
@@ -510,7 +515,7 @@ bool URLMeshDemoArenaComponent::TryCollectGoal()
 	GoalActor->SetActorHiddenInGame(true);
 	EnsurePickupProp(GoalActor);
 	++TotalCollected;
-	UE_LOG(LogRLMesh, Log, TEXT("Demo Arena: collected goal (%s)"), *GoalActor->GetActorLabel());
+	UE_LOG(LogRLMesh, Verbose, TEXT("Demo Arena: collected goal (%s)"), *GoalActor->GetActorLabel());
 	return true;
 }
 
@@ -602,7 +607,7 @@ rlmesh::StepResult URLMeshDemoArenaComponent::StepEnv(const std::optional<rlmesh
 	const bool bTerminated = bHit || bAllDone;
 	const bool bTruncated = !bTerminated && Steps >= MaxSteps;
 
-	if (bTerminated || bTruncated || CollectedThisStep > 0 || (Steps % 50) == 0)
+	if (bTerminated || bTruncated)
 	{
 		const FVector Loc = AgentLocation();
 		UE_LOG(LogRLMesh, Log,
@@ -611,6 +616,15 @@ rlmesh::StepResult URLMeshDemoArenaComponent::StepEnv(const std::optional<rlmesh
 			   Steps, Dist, bHit ? 1 : 0, CoinsLeft(), (bHaveGoal && !bGoalCollected) ? 1 : 0,
 			   CollectedThisStep, bLastSuccess ? 1 : 0, Loc.X, Loc.Y,
 			   bTruncated ? TEXT(" truncated") : TEXT(""));
+	}
+	else if (CollectedThisStep > 0 || (Steps % 50) == 0)
+	{
+		const FVector Loc = AgentLocation();
+		UE_LOG(LogRLMesh, Verbose,
+			   TEXT("Demo Arena step %d: nearest=%.1f hit=%d coins_left=%d goal_left=%d picked=%d "
+					"-> (%.1f, %.1f)"),
+			   Steps, Dist, bHit ? 1 : 0, CoinsLeft(), (bHaveGoal && !bGoalCollected) ? 1 : 0,
+			   CollectedThisStep, Loc.X, Loc.Y);
 	}
 
 	return {Observe(), Reward, bTerminated, bTruncated,
