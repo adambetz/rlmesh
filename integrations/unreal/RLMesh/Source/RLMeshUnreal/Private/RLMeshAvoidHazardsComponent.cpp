@@ -133,6 +133,8 @@ void URLMeshAvoidHazardsComponent::EnsureHazardActors()
 			Extra->Destroy();
 		}
 	}
+	// Prefer the placeable BP (/Game/BP_Obstacle); fall back to a BasicShapes cube.
+	UClass* ObstacleBP = LoadClass<AActor>(nullptr, TEXT("/Game/BP_Obstacle.BP_Obstacle_C"));
 	UStaticMesh* Mesh =
 		LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 	const float Scale = (HazardHalfExtent * 2.f) / 100.f; // BasicShapes Cube is 100uu
@@ -140,32 +142,41 @@ void URLMeshAvoidHazardsComponent::EnsureHazardActors()
 	{
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		AStaticMeshActor* Hazard =
-			World->SpawnActor<AStaticMeshActor>(Start, FRotator::ZeroRotator, Params);
+		AActor* Hazard = nullptr;
+		if (ObstacleBP)
+		{
+			Hazard = World->SpawnActor<AActor>(ObstacleBP, Start, FRotator::ZeroRotator, Params);
+		}
 		if (!Hazard)
 		{
-			break;
+			AStaticMeshActor* SMA =
+				World->SpawnActor<AStaticMeshActor>(Start, FRotator::ZeroRotator, Params);
+			if (!SMA)
+			{
+				break;
+			}
+			if (UStaticMeshComponent* SMC = SMA->GetStaticMeshComponent())
+			{
+				SMC->SetMobility(EComponentMobility::Movable);
+				if (Mesh)
+				{
+					SMC->SetStaticMesh(Mesh);
+				}
+				SMC->SetWorldScale3D(FVector(Scale));
+				SMC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				UMaterialInterface* Mat = HazardMaterial;
+				if (!Mat)
+				{
+					Mat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Red.Red"));
+				}
+				if (Mat)
+				{
+					SMC->SetMaterial(0, Mat);
+				}
+			}
+			Hazard = SMA;
 		}
 		Hazard->SetActorLabel(FString::Printf(TEXT("Hazard_%d"), HazardActors.Num()));
-		if (UStaticMeshComponent* SMC = Hazard->GetStaticMeshComponent())
-		{
-			SMC->SetMobility(EComponentMobility::Movable);
-			if (Mesh)
-			{
-				SMC->SetStaticMesh(Mesh);
-			}
-			SMC->SetWorldScale3D(FVector(Scale));
-			SMC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			UMaterialInterface* Mat = HazardMaterial;
-			if (!Mat)
-			{
-				Mat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Red.Red"));
-			}
-			if (Mat)
-			{
-				SMC->SetMaterial(0, Mat);
-			}
-		}
 		HazardActors.Add(Hazard);
 	}
 }

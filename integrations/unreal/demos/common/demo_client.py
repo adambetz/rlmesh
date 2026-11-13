@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
+import socket
 import sys
 import time
 import urllib.error
@@ -20,6 +23,12 @@ import urllib.request
 from typing import Any
 
 DEFAULT_BASE = "http://127.0.0.1:8878"
+_DEFAULT_SERVE_HOST = "127.0.0.1"
+_DEFAULT_SERVE_PORT = 7447
+_SERVE_ADDR_RE = re.compile(
+    r"^(?:rlmesh://)?(?P<host>\[[^\]]+\]|[^:#/]+)?(?::(?P<port>\d+))?",
+    re.IGNORECASE,
+)
 
 _CONTROL_HINT = (
     "Open the RLmeshSim Unreal editor (demo control starts automatically), "
@@ -79,24 +88,89 @@ def stop(*, base: str = DEFAULT_BASE) -> dict[str, Any]:
     return request("POST", "/v1/stop", base=base)
 
 
+def serve_endpoint(
+    address: str | None = None,
+) -> tuple[str, int]:
+    """Host/port Unreal EnvServer should listen on (from addr or defaults)."""
+    raw = (address or os.environ.get("RLMESH_UNREAL_ADDR", "")).strip()
+    if not raw:
+        return _DEFAULT_SERVE_HOST, _DEFAULT_SERVE_PORT
+    # Strip invite key / participant: host:port#keys/env → host:port
+    base = raw.split("#", 1)[0].split("/", 1)[0]
+    match = _SERVE_ADDR_RE.match(base)
+    if not match:
+        return _DEFAULT_SERVE_HOST, _DEFAULT_SERVE_PORT
+    host = (match.group("host") or _DEFAULT_SERVE_HOST).strip("[]") or _DEFAULT_SERVE_HOST
+    port_s = match.group("port")
+    port = int(port_s) if port_s else _DEFAULT_SERVE_PORT
+    return host, port
+
+
+def serving_reachable(
+    *,
+    address: str | None = None,
+    timeout: float = 0.4,
+) -> bool:
+    """True when something accepts TCP on the EnvServer port (usually Serving)."""
+    host, port = serve_endpoint(address)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def wait_for_serving(
+    *,
+    address: str | None = None,
+    timeout_sec: float = 30.0,
+    poll_sec: float = 0.5,
+) -> bool:
+    """Poll until EnvServer accepts connections, or ``timeout_sec`` elapses."""
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    while True:
+        if serving_reachable(address=address):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(max(0.05, poll_sec))
+
+
 def ensure_demo(
     demo_id: str,
     *,
     base: str = DEFAULT_BASE,
     wait_playing_sec: float = 30.0,
     poll_sec: float = 0.5,
+    force_replay: bool = False,
 ) -> dict[str, Any]:
     """Load ``demo_id`` and begin Play if needed; return final status.
 
-    No-op when status already has this ``demo_id`` and ``state == playing``.
+    Skips load/play only when this demo is already playing **and** the EnvServer
+    port accepts TCP. After Ctrl-C or a failed ``Serving`` start, status can stay
+    ``playing`` with nothing on :7447 — that case stops and Plays again.
     """
     demo_id = demo_id.strip()
     if not demo_id:
         raise ValueError("demo_id is required")
 
+    # Suite .env may already be loaded; still allow addr from the process env.
     status = get_status(base=base)
-    if status.get("demo_id") == demo_id and status.get("state") == "playing":
+    already = status.get("demo_id") == demo_id and status.get("state") == "playing"
+    if already and not force_replay and serving_reachable():
         return status
+
+    if status.get("state") == "playing" or force_replay:
+        # Bounce PIE so EnvServer can bind again (stale Play after interrupt /
+        # "Could not serve … session host" leaves control state lying).
+        try:
+            stop(base=base)
+        except DemoControlError:
+            pass
+        # Let EndPlay finish releasing :7447 before load/play.
+        dead_deadline = time.monotonic() + min(10.0, wait_playing_sec)
+        while serving_reachable() and time.monotonic() < dead_deadline:
+            time.sleep(poll_sec)
 
     load_result = load_demo(demo_id, base=base)
     if load_result.get("ok") is False:
@@ -110,9 +184,16 @@ def ensure_demo(
             f"play after load {demo_id!r} failed: {play_result.get('error') or play_result}"
         )
 
-    # PostPIEStarted reloads the control server and can reset /v1/status; the play
-    # response is authoritative. Wait for EnvServer, then return.
-    time.sleep(min(2.5, wait_playing_sec))
+    # PostPIEStarted reloads the control server and can reset /v1/status; wait
+    # until EnvServer actually accepts TCP (LogRLMesh Serving …).
+    if not wait_for_serving(timeout_sec=wait_playing_sec, poll_sec=poll_sec):
+        host, port = serve_endpoint()
+        raise DemoControlError(
+            f"Play started for {demo_id!r} but nothing accepted TCP on "
+            f"{host}:{port} within {wait_playing_sec:.0f}s "
+            "(check LogRLMesh for Serving / Could not serve)"
+        )
+
     last: dict[str, Any] = play_result.get("status") or {}
     try:
         polled = get_status(base=base)

@@ -18,6 +18,8 @@ DEFAULT_PARTICIPANT = "env"
 HOST_IDENTITY_VAR = "RLMESH_HOST_IDENTITY"
 UNREAL_ADDR_VAR = "RLMESH_UNREAL_ADDR"
 EPISODES_VAR = "RLMESH_EPISODES"
+# Raise Unreal MaxFPS while Serving so lockstep steps faster (0 = leave engine default).
+UNREAL_MAX_FPS_VAR = "RLMESH_UNREAL_MAX_FPS"
 
 
 def rlmesh_data_dir() -> Path:

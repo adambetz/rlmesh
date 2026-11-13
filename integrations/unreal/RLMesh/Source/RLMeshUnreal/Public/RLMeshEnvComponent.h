@@ -49,6 +49,18 @@ public:
 	UPROPERTY(EditAnywhere, Category = "RLMesh")
 	FString HostIdentityFile;
 
+	/**
+	 * Cap/raise engine MaxFPS while this env is Serving so Python lockstep can
+	 * step faster than the editor's default frame rate. 0 leaves MaxFPS alone.
+	 * Clients may also pass reset option ``serving_max_fps`` (float/int).
+	 */
+	UPROPERTY(EditAnywhere, Category = "RLMesh", meta = (ClampMin = "0", ClampMax = "480"))
+	float ServingMaxFPS = 120.f;
+
+	/** Restore the previous MaxFPS when Play ends (after applying ServingMaxFPS). */
+	UPROPERTY(EditAnywhere, Category = "RLMesh")
+	bool bRestoreMaxFPSOnEndPlay = true;
+
 	/** The address the env is served on, or empty when it is not serving. */
 	UFUNCTION(BlueprintCallable, Category = "RLMesh")
 	FString GetServedAddress() const { return ServedAddress; }
@@ -56,12 +68,19 @@ public:
 	/** Load the default host-identity file into RLMESH_HOST_IDENTITY (module startup). */
 	static void ApplyDefaultHostIdentity();
 
+	/** Apply ServingMaxFPS (or ``NewMaxFPS`` if > 0) while serving. */
+	UFUNCTION(BlueprintCallable, Category = "RLMesh")
+	void ApplyServingMaxFPS(float NewMaxFPS = 0.f);
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
 							   FActorComponentTickFunction* ThisTickFunction) override;
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/** Optional hook: subclasses may read reset options after the base applies FPS. */
+	virtual void OnResetOptions(const std::optional<rlmesh::InfoDict>& Options);
 
 	virtual rlmesh::spaces::Space ObservationSpace() const
 		PURE_VIRTUAL(URLMeshEnvComponent::ObservationSpace, return rlmesh::spaces::Discrete(1););
@@ -77,8 +96,13 @@ private:
 	static bool ApplyHostIdentityFromPath(const FString& Path);
 
 	void ApplyHostIdentityFromFile();
+	void ApplyServingMaxFPSFromOptions(const std::optional<rlmesh::InfoDict>& Options);
+	void RestoreServingMaxFPS();
 
 	std::shared_ptr<FRLMeshGameThread> GameThread;
 	std::unique_ptr<rlmesh::EnvServer> Server;
 	FString ServedAddress;
+
+	bool bHaveSavedMaxFPS = false;
+	float SavedMaxFPS = 0.f;
 };

@@ -21,12 +21,39 @@ from paths import (
     DOTENV_PATH,
     EPISODES_VAR,
     UNREAL_ADDR_VAR,
+    UNREAL_MAX_FPS_VAR,
 )
 
-# Soft defaults for live Unreal PIE (~1 step/frame ≈ 2–5 FPS).
+# Soft defaults for live Unreal PIE (~1 step/frame unless ServingMaxFPS is raised).
 DEFAULT_TRAIN_TIMESTEPS = 512
 DEFAULT_PPO_N_STEPS = 128
 DEFAULT_EVAL_EPISODES = 1
+
+
+def resolve_serving_max_fps(cli_fps: float | None = None) -> float:
+    """FPS hint for Unreal lockstep (``RLMESH_UNREAL_MAX_FPS`` or CLI). 0 = unchanged."""
+    if cli_fps is not None and cli_fps > 0:
+        return float(cli_fps)
+    raw = os.environ.get(UNREAL_MAX_FPS_VAR, "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 0.0
+
+
+def reset_options_with_fps(
+    options: dict[str, Any] | None = None,
+    *,
+    serving_max_fps: float | None = None,
+) -> dict[str, Any]:
+    """Merge ``serving_max_fps`` into gym/rlmesh reset options when set."""
+    out = dict(options or {})
+    fps = resolve_serving_max_fps(serving_max_fps)
+    if fps > 0:
+        out.setdefault("serving_max_fps", fps)
+    return out
 
 
 def ensure_artifacts_dir(artifacts_dir: Path) -> Path:
@@ -68,6 +95,7 @@ def ensure_unreal_demo(demo_id: str | None) -> None:
     """Ask the editor to load ``demo_id`` and Play before connecting."""
     if not demo_id:
         return
+    load_suite_dotenv()
     from demo_client import DemoControlError, ensure_demo
 
     print(f"Ensuring Unreal demo={demo_id} …")
@@ -83,18 +111,42 @@ def make_remote_env(
     address: str | None = None,
     *,
     demo_id: str | None = None,
+    serving_max_fps: float | None = None,
     **remote_kwargs: Any,
 ):
     """Connect to a serving Unreal env as ``rlmesh.numpy.RemoteEnv``.
 
     When ``demo_id`` is set, load that scenario via the demo control API first.
     When gymnasium is installed, the client is a ``gymnasium.Env``.
+
+    ``serving_max_fps`` (or ``RLMESH_UNREAL_MAX_FPS``) is sent on each ``reset`` as
+    option ``serving_max_fps`` so the Unreal plugin can raise MaxFPS for faster
+    lockstep. The component Details default ``Serving Max FPS`` also applies on Play.
     """
     ensure_unreal_demo(demo_id)
     addr = require_address(address)
     from rlmesh.numpy import RemoteEnv
 
-    return RemoteEnv(addr, **remote_kwargs)
+    env = RemoteEnv(addr, **remote_kwargs)
+    fps = resolve_serving_max_fps(serving_max_fps)
+    if fps <= 0:
+        return env
+
+    inner_reset = env.reset
+
+    def reset_with_fps(*args: Any, **kwargs: Any):
+        options = kwargs.get("options")
+        if options is None and args:
+            # gymnasium reset(*, seed=None, options=None) — options usually kw-only.
+            pass
+        kwargs["options"] = reset_options_with_fps(
+            kwargs.get("options") if isinstance(kwargs.get("options"), dict) else None,
+            serving_max_fps=fps,
+        )
+        return inner_reset(*args, **kwargs)
+
+    env.reset = reset_with_fps  # type: ignore[method-assign]
+    return env
 
 
 def smoke_remote_env(
@@ -240,10 +292,20 @@ def train_ppo(
         model.learn(total_timesteps=total_timesteps)
         # SB3 writes ``<stem>.zip``.
         model.save(save_stem)
+    except AttributeError as exc:
+        # SB3/gymnasium bridge may touch gym.__version__ during teardown after save.
+        if "__version__" not in str(exc):
+            raise
+        print(f"warning: ignoring gym version quirk after train: {exc}", file=sys.stderr)
     finally:
-        env.close()
+        try:
+            env.close()
+        except Exception as close_exc:  # noqa: BLE001 — SB3/gym version quirks on close
+            print(f"warning: env.close() after train: {close_exc}", file=sys.stderr)
 
     saved = Path(save_stem + ".zip")
+    if not saved.is_file():
+        raise FileNotFoundError(f"PPO save missing at {saved}")
     print(f"saved {saved}")
     return saved
 
